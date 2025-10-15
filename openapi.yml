@@ -1,0 +1,316 @@
+openapi: 3.1.0
+info:
+  title: BO Bank API
+  version: 0.1.0
+  description: >
+    Minimal API for deposits (top-ups), account-to-account transfers, and user updates.
+    Amounts are integers in minor units (e.g., cents). All times are UTC.
+
+servers:
+  - url: http://localhost:8000
+    description: Local (Laravel artisan serve)
+  - url: http://localhost
+    description: Local (Docker/Nginx)
+
+tags:
+  - name: Payments
+    description: Deposits and transfers
+  - name: Users
+    description: User management
+
+paths:
+  /api/top-up:
+    post:
+      operationId: createTopUp
+      summary: Create a deposit (system cash-in -> user account)
+      tags: [ Payments ]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TopUpRequest'
+            examples:
+              example:
+                value:
+                  account_id: "c6f1d3c7-49e8-49d9-86d7-6d3a1b4a2d77"
+                  email: "user@example.com"
+                  amount: 1000
+                  currency_code: "EUR"
+      responses:
+        '201':
+          description: Created — deposit posted (balanced ledger entries)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TopUpResponse'
+              examples:
+                ok:
+                  value: { status: "ok", txn_id: "a3c0a5cf-03e1-4d1d-8a7e-b6b3d3af0e2c" }
+        '409':
+          description: Conflict — duplicate idempotency, or business rule violation
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/Problem'
+                  - $ref: '#/components/schemas/ConflictProblem'
+              examples:
+                duplicate:
+                  value: { status: "ok", txn_id: "a3c0a5cf-03e1-4d1d-8a7e-b6b3d3af0e2c" }
+                businessRule:
+                  value:
+                    message: "Deposit failed due to business rule violation."
+                    errors: { balance: [ "Insufficient funds or constraint violation." ] }
+        '422':
+          description: Validation error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationProblem' }
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /api/transfers:
+    post:
+      operationId: createTransfer
+      summary: Transfer funds between two accounts
+      tags: [ Payments ]
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TransferRequest' }
+            examples:
+              example:
+                value:
+                  from_account_id: "11111111-2222-3333-4444-555555555555"
+                  to_account_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+                  amount: 1000
+                  currency_code: "EUR"
+      responses:
+        '201':
+          description: Created — transfer posted (balanced ledger entries)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TransferResponse' }
+              examples:
+                ok:
+                  value: { status: "ok", txn_id: "b2c1f71d-bf28-4f4d-9a99-0a9f2d6a0e1d" }
+        '409':
+          description: Conflict — duplicate idempotency or business rule violation (e.g., insufficient funds)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
+              examples:
+                insufficientFunds:
+                  value:
+                    message: "Transfer failed due to business rule violation."
+                    errors: { balance: [ "Insufficient funds or constraint violation." ] }
+        '422':
+          description: Validation error (same-account, amount <= 0, currency mismatch, etc.)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationProblem' }
+        '500':
+          description: Server error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
+
+  /api/users/{user}:
+    put:
+      operationId: updateUser
+      summary: Update a user
+      tags: [ Users ]
+      parameters:
+        - name: user
+          in: path
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UpdateUserRequest' }
+            examples:
+              example:
+                value:
+                  name: "Alice"
+                  email: "alice@example.com"
+                  age: 30
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UpdateUserResponse' }
+        '404':
+          description: Not found
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Problem' }
+        '422':
+          description: Validation error (email unique, age >= 18, etc.)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ValidationProblem' }
+
+components:
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: >
+        Idempotency key to make requests safe to retry. If omitted, server may generate a key internally,
+        but clients SHOULD provide one for external calls.
+      schema:
+        type: string
+        maxLength: 128
+      examples:
+        example: { value: "0b0d2d1a-591b-4d9f-a7c2-1c2f8c0c6f3e" }
+
+  schemas:
+    UUID:
+      type: string
+      format: uuid
+      example: "a3c0a5cf-03e1-4d1d-8a7e-b6b3d3af0e2c"
+
+    CurrencyCode:
+      type: string
+      minLength: 3
+      maxLength: 3
+      pattern: "^[A-Z]{3}$"
+      example: "EUR"
+
+    AmountMinor:
+      type: integer
+      format: int64
+      minimum: 1
+      description: Positive integer in minor units (e.g., cents)
+      example: 1000
+
+    Email:
+      type: string
+      format: email
+      example: "user@example.com"
+
+    TopUpRequest:
+      type: object
+      required: [ account_id, email, amount, currency_code ]
+      properties:
+        account_id: { $ref: '#/components/schemas/UUID' }
+        email: { $ref: '#/components/schemas/Email' }
+        amount: { $ref: '#/components/schemas/AmountMinor' }
+        currency_code: { $ref: '#/components/schemas/CurrencyCode' }
+        idempotency_key:
+          type: string
+          maxLength: 128
+
+    TopUpResponse:
+      type: object
+      required: [ status, txn_id ]
+      properties:
+        status:
+          type: string
+          enum: [ ok ]
+        txn_id:
+          $ref: '#/components/schemas/UUID'
+
+    TransferRequest:
+      type: object
+      required: [ from_account_id, to_account_id, amount, currency_code ]
+      properties:
+        from_account_id: { $ref: '#/components/schemas/UUID' }
+        to_account_id: { $ref: '#/components/schemas/UUID' }
+        amount: { $ref: '#/components/schemas/AmountMinor' }
+        currency_code: { $ref: '#/components/schemas/CurrencyCode' }
+        idempotency_key:
+          type: string
+          maxLength: 128
+
+    TransferResponse:
+      type: object
+      required: [ status, txn_id ]
+      properties:
+        status:
+          type: string
+          enum: [ ok ]
+        txn_id:
+          $ref: '#/components/schemas/UUID'
+
+    UpdateUserRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          maxLength: 255
+        email:
+          type: string
+          format: email
+          maxLength: 254
+        age:
+          type: integer
+          minimum: 18
+      description: >
+        Partial updates are allowed (controller accepts PUT with 'sometimes' rules). Email must be unique per user.
+
+    UpdateUserResponse:
+      type: object
+      required: [ status, user ]
+      properties:
+        status:
+          type: boolean
+          example: true
+        user:
+          type: object
+          properties:
+            id: { $ref: '#/components/schemas/UUID' }
+            name: { type: string }
+            email: { type: string, format: email }
+            age: { type: integer, minimum: 18 }
+
+    Problem:
+      type: object
+      description: Generic error shape
+      properties:
+        message: { type: string }
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+      example:
+        message: "Transfer failed."
+        errors:
+          db: [ "SQLSTATE[23514] check_violation: insufficient funds" ]
+
+    ConflictProblem:
+      allOf:
+        - $ref: '#/components/schemas/Problem'
+      example:
+        message: "Transfer failed due to business rule violation."
+        errors:
+          balance: [ "Insufficient funds or constraint violation." ]
+
+    ValidationProblem:
+      type: object
+      properties:
+        message: { type: string, example: "The given data was invalid." }
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+      example:
+        message: "The given data was invalid."
+        errors:
+          amount: [ "The amount must be at least 1." ]
+          currency_code: [ "The selected currency code is invalid." ]

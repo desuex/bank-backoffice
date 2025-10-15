@@ -24,7 +24,7 @@ class UpdateUserTest extends TestCase
             'age'   => 30,
         ];
 
-        $res = $this->putJson(route('user.update', ['user' => $user->id]), $payload);
+        $res = $this->putJson(route('users.update', ['user' => $user->id]), $payload);
 
         $res->assertStatus(200)
             ->assertJson([
@@ -55,7 +55,7 @@ class UpdateUserTest extends TestCase
             'age'   => -1,
         ];
 
-        $res = $this->putJson(route('user.update', ['user' => $user->id]), $payload);
+        $res = $this->putJson(route('users.update', ['user' => $user->id]), $payload);
 
         $res->assertStatus(422)
             ->assertJsonValidationErrors(['email', 'age']);
@@ -66,14 +66,14 @@ class UpdateUserTest extends TestCase
         $existing = User::factory()->create(['email' => 'taken@example.test']);
         $user     = User::factory()->create(['email' => 'me@example.test']);
 
-        $res = $this->putJson(route('user.update', ['user' => $user->id]), [
+        $res = $this->putJson(route('users.update', ['user' => $user->id]), [
             'email' => 'taken@example.test',
         ]);
 
         $res->assertStatus(422)
             ->assertJsonValidationErrors(['email']);
 
-        $res = $this->putJson(route('user.update', ['user' => $user->id]), [
+        $res = $this->putJson(route('users.update', ['user' => $user->id]), [
             'email' => 'me@example.test',
         ]);
 
@@ -88,7 +88,7 @@ class UpdateUserTest extends TestCase
             'age'   => 22,
         ]);
 
-        $res = $this->putJson(route('user.update', ['user' => $user->id]), [
+        $res = $this->putJson(route('users.update', ['user' => $user->id]), [
             'name' => 'Bob Marley',
         ]);
 
